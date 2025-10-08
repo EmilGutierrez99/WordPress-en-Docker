@@ -14,8 +14,8 @@ RUN apt-get update && apt-get install -y \
 # Eliminar la página por defecto de Apache
 RUN rm -f /var/www/html/index.html
 
-# Crear un archivo PHP con "Hola mundo"
-RUN echo "<?php echo '<h1>Hola mundo</h1>'; ?>" > /var/www/html/index.php
+# Crear un archivo PHP con phpinfo
+RUN echo "<?php phpinfo(); ?>" > /var/www/html/index.php
 
 # Dar permisos a Apache
 RUN chown -R www-data:www-data /var/www/html
