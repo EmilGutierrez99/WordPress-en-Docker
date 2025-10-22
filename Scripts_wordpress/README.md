@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-"# docker" 
-=======
 # 🧾 Backup y Restore de Contenedores Docker (WordPress + MySQL)
 
 ## 📘 Descripción General
@@ -63,4 +60,3 @@ volumes:
   db2_data:
   wordpress2_data:
 ```
->>>>>>> e523449 (Primer commit - subida inicial a rama development)
