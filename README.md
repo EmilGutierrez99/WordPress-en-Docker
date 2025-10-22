@@ -6,16 +6,6 @@ permitiendo clonar o recuperar sitios fácilmente.
 
 ---
 
-## Estructura del Proyecto
-
-/
-├── Scripts_wordpress/ # Scripts .bat para realizar backups y restores
-├── Site_Wordpress1/ # Primer entorno WordPress con su base de datos
-├── Site_Wordpress2/ # Segundo entorno WordPress con su base de datos
-└── README.md # Documentación del proyecto
-
----
-
 ## Componentes Principales
 
 - **Windows 10:** Sistema operativo que permite ejecutar Docker Desktop.
@@ -33,4 +23,5 @@ Proveer un entorno de trabajo reproducible, modular y fácil de mantener para el
 facilitando la creación, respaldo y restauración de entornos mediante Docker y scripts automatizados.
 
 ---
-"# Proyecto_Docker" 
+
+"# Proyecto_Docker"
