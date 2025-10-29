@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 :: ===================================================
 :: RESTORE DOCKER WORDPRESS + MYSQL (.ZIP)
-:: US-99 - Version Final Estable y Robusta
+:: US-99 - Version Segura (corrige permisos y valida uploads)
 :: ===================================================
 
 title Restore Docker WP + MySQL
@@ -77,11 +77,18 @@ if not exist "%BASE_TMP%\html" (
     pause
     exit /b
 )
-if not exist "%BASE_TMP%\wp.sql" (
-    echo [ERROR] No se encontro el archivo wp.sql.
+
+:: Buscar cualquier archivo .sql dentro del backup
+set "SQL_FILE="
+for %%F in ("%BASE_TMP%\*.sql") do set "SQL_FILE=%%~nxF"
+
+if "%SQL_FILE%"=="" (
+    echo [ERROR] No se encontro ningun archivo .sql en el backup.
     pause
     exit /b
 )
+
+echo [OK] Archivo SQL detectado: %SQL_FILE%
 
 :: Detener contenedores destino
 echo.
@@ -99,12 +106,11 @@ echo Esperando a que los contenedores esten listos...
 ping 127.0.0.1 -n 6 >nul
 
 :: ==============================================
-:: Restaurar archivos de WordPress (modo robusto)
+:: Restaurar archivos de WordPress
 :: ==============================================
 echo.
 echo Restaurando archivos de WordPress...
 
-:: Confirmar que el contenedor esta realmente en ejecucion
 for /f "tokens=*" %%i in ('docker inspect -f "{{.State.Running}}" %WP_CONTAINER% 2^>nul') do set "IS_RUNNING=%%i"
 
 if /I NOT "%IS_RUNNING%"=="true" (
@@ -113,12 +119,7 @@ if /I NOT "%IS_RUNNING%"=="true" (
     ping 127.0.0.1 -n 6 >nul
 )
 
-:: Espera extra para asegurar inicializacion completa
-echo Esperando que el contenedor "%WP_CONTAINER%" este completamente listo...
-ping 127.0.0.1 -n 6 >nul
-
-:: Crear /var/www/html incluso si no existe
-echo Creando ruta /var/www/html en "%WP_CONTAINER%"...
+echo Verificando ruta /var/www/html en "%WP_CONTAINER%"...
 mkdir "%BASE_TMP%\_empty" >nul 2>&1
 docker cp "%BASE_TMP%\_empty" "%WP_CONTAINER%":/var/www/ >nul 2>&1
 docker exec "%WP_CONTAINER%" sh -c "test -d /var/www/html" >nul 2>&1
@@ -130,18 +131,19 @@ if errorlevel 1 (
 )
 rd /s /q "%BASE_TMP%\_empty" >nul 2>&1
 
-:: Limpiar contenido anterior
 docker exec "%WP_CONTAINER%" sh -c "rm -rf /var/www/html/*" >nul 2>&1
-
-:: Copiar archivos restaurados
 docker cp "%BASE_TMP%\html\." "%WP_CONTAINER%":/var/www/html/ >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] No se pudieron copiar los archivos al contenedor WordPress.
-    echo Verifica que el contenedor "%WP_CONTAINER%" este en ejecucion y tenga /var/www/html.
     pause
     exit /b
 )
 echo [OK] Archivos restaurados correctamente en %WP_CONTAINER%.
+
+:: Ajustar permisos y propietario
+echo Corrigiendo permisos y propietario...
+docker exec "%WP_CONTAINER%" sh -c "chown -R www-data:www-data /var/www/html"
+docker exec "%WP_CONTAINER%" sh -c "chmod -R 755 /var/www/html"
 
 :: ==============================================
 :: Restaurar base de datos MySQL
@@ -170,7 +172,7 @@ if not "%MYSQL_ROOT_PASSWORD%"=="" (
     )
 )
 
-docker cp "%BASE_TMP%\wp.sql" "%DB_CONTAINER%":/tmp/wp.sql >nul 2>&1
+docker cp "%BASE_TMP%\%SQL_FILE%" "%DB_CONTAINER%":/tmp/wp.sql >nul 2>&1
 docker exec "%DB_CONTAINER%" sh -c "mysql -u%DB_USER% -p%DB_PASS% %MYSQL_DATABASE% < /tmp/wp.sql" >nul 2>&1
 docker exec "%DB_CONTAINER%" sh -c "rm -f /tmp/wp.sql" >nul 2>&1
 if errorlevel 1 (
@@ -180,10 +182,29 @@ if errorlevel 1 (
 )
 echo [OK] Base de datos restaurada correctamente en %DB_CONTAINER%.
 
-:: Reiniciar WordPress (asegurar servicio)
+:: Reiniciar contenedor WordPress para aplicar cambios
 docker restart "%WP_CONTAINER%" >nul 2>&1
+ping 127.0.0.1 -n 5 >nul
 
-:: Limpiar archivos temporales
+:: ==============================================
+:: Verificar permisos de uploads
+:: ==============================================
+echo.
+echo Verificando permisos de escritura en wp-content/uploads...
+docker exec "%WP_CONTAINER%" sh -c "mkdir -p /var/www/html/wp-content/uploads/test_perm && echo test > /var/www/html/wp-content/uploads/test_perm/test.txt" >nul 2>&1
+
+if errorlevel 1 (
+    echo [ADVERTENCIA] El contenedor no puede escribir en wp-content/uploads.
+    echo Es posible que WordPress no pueda subir archivos.
+    echo Ejecuta manualmente dentro del contenedor:
+    echo     chown -R www-data:www-data /var/www/html/wp-content/uploads
+    echo     chmod -R 755 /var/www/html/wp-content/uploads
+) else (
+    echo [OK] Verificacion completada: WordPress puede escribir en wp-content/uploads.
+    docker exec "%WP_CONTAINER%" sh -c "rm -rf /var/www/html/wp-content/uploads/test_perm" >nul 2>&1
+)
+
+:: Limpiar temporales
 rd /s /q "%BASE_TMP%" >nul 2>&1
 
 echo.

@@ -1,103 +1,95 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM =============================
-REM SOLICITAR NOMBRE DE ARCHIVO Y DOMINIO
-REM =============================
-set /p INPUT_ZIP=Ingrese el nombre del archivo ZIP de entrada (ej. wordpress1-Base-de-datos-1-20251020-1701.zip): 
-set /p NEW_DOMAIN=Ingrese el nuevo dominio (ej. micompleto.com): 
+:: ===========================
+:: CONFIGURACIÓN Y PARÁMETROS
+:: ===========================
+set /p ZIP_ORIG="Nombre del archivo ZIP original (con extensión): "
+set /p OLD_DOMAIN="Dominio anterior: "
+set /p NEW_DOMAIN="Dominio nuevo: "
+set /p VOL_SRC="Nombre del volumen Docker origen: "
+set /p VOL_DST="Nombre del volumen Docker destino: "
+set /p TMP_DIR="Ruta temporal (por defecto C:\temp\backup_wp): "
 
-REM =============================
-REM COPIAR ARCHIVO DESDE DOCKER VOLUME
-REM =============================
-echo 📦 Copiando "%INPUT_ZIP%" desde el volumen de Docker "volumen_z" a la carpeta actual...
-docker run --rm -v volumen_z:/origen -v "%cd%":/destino busybox sh -c "cp /origen/%INPUT_ZIP% /destino"
+if "%TMP_DIR%"=="" set TMP_DIR=C:\temp\backup_wp
+if not exist "%TMP_DIR%" mkdir "%TMP_DIR%"
 
-if not exist "%INPUT_ZIP%" (
-    echo ❌ ERROR: No se pudo copiar "%INPUT_ZIP%" desde el volumen.
-    pause
-    exit /b
+set LOG_FILE=%TMP_DIR%\log.txt
+echo [%date% %time%] Iniciando proceso >> "%LOG_FILE%"
+
+:: ===========================
+:: VALIDACIONES INICIALES
+:: ===========================
+docker version >nul 2>&1
+if errorlevel 1 (
+    echo Docker no está disponible. >> "%LOG_FILE%"
+    echo ❌ Docker no está disponible.
+    exit /b 1
 )
 
-REM =============================
-REM OBTENER NOMBRE BASE Y RUTAS
-REM =============================
-for %%I in ("%INPUT_ZIP%") do set BASENAME=%%~nI
-set OUTPUT_ZIP=%BASENAME%-DominioModificado.zip
+if not exist "%TMP_DIR%" mkdir "%TMP_DIR%"
 
-set TEMP_DIR=%~dp0temp_wp
-set DB_DIR=%TEMP_DIR%\wordpress-DB
-
-echo =============================
-echo 📂 Archivo copiado: %INPUT_ZIP%
-echo 🌐 Nuevo dominio: %NEW_DOMAIN%
-echo 🧾 Archivo de salida: %OUTPUT_ZIP%
-echo =============================
-
-REM =============================
-REM LIMPIAR TEMPORAL
-REM =============================
-if exist "%TEMP_DIR%" rmdir /s /q "%TEMP_DIR%"
-mkdir "%TEMP_DIR%"
-
-REM =============================
-REM 1. EXTRAER ZIP PRINCIPAL
-REM =============================
-echo 📂 Extrayendo %INPUT_ZIP%...
-powershell -Command "Expand-Archive -LiteralPath '%INPUT_ZIP%' -DestinationPath '%TEMP_DIR%' -Force"
-
-if not exist "%TEMP_DIR%\wordpress-DB.zip" (
-    echo ❌ ERROR: No se encontró wordpress-DB.zip dentro del archivo.
-    pause
-    exit /b
+:: ===========================
+:: COPIA DESDE VOLUMEN ORIGEN
+:: ===========================
+echo 📦 Copiando archivo desde volumen origen...
+docker run --rm -v %VOL_SRC%:/data -v //c/temp:/backup alpine sh -c "cp /data/%ZIP_ORIG% /backup/" 2>>"%LOG_FILE%"
+if errorlevel 1 (
+    echo ❌ Error al copiar desde el volumen origen. >> "%LOG_FILE%"
+    exit /b 1
 )
 
-REM =============================
-REM 2. EXTRAER WORDPRESS-DB.ZIP
-REM =============================
-echo 📂 Extrayendo wordpress-DB.zip...
-powershell -Command "Expand-Archive -LiteralPath '%TEMP_DIR%\wordpress-DB.zip' -DestinationPath '%DB_DIR%' -Force"
-
-if not exist "%DB_DIR%\wp.sql" (
-    echo ❌ ERROR: No se encontró wp.sql dentro de wordpress-DB.zip.
-    pause
-    exit /b
+:: ===========================
+:: DESCOMPRESIÓN NIVEL 1
+:: ===========================
+echo 🧰 Descomprimiendo archivo principal...
+powershell -Command "Expand-Archive -Force 'C:\temp\%ZIP_ORIG%' '%TMP_DIR%\zip_ext'" 2>>"%LOG_FILE%"
+if errorlevel 1 (
+    echo ❌ Error al descomprimir ZIP principal. >> "%LOG_FILE%"
+    exit /b 1
 )
 
-REM =============================
-REM 3. REEMPLAZAR DOMINIO EN wp.sql
-REM =============================
-echo ✍️ Reemplazando 'localhost:8080' por '%NEW_DOMAIN%' en wp.sql...
-powershell -Command "(Get-Content '%DB_DIR%\wp.sql') -replace 'localhost:8080', '%NEW_DOMAIN%' | Set-Content '%DB_DIR%\wp.sql'"
+:: ===========================
+:: DESCOMPRESIÓN wordpress-DB.zip
+:: ===========================
+echo 🧰 Descomprimiendo wordpress-DB.zip...
+powershell -Command "Expand-Archive -Force '%TMP_DIR%\zip_ext\wordpress-DB.zip' '%TMP_DIR%\zip_db'" 2>>"%LOG_FILE%"
 
-REM =============================
-REM 4. VOLVER A COMPRIMIR wordpress-DB.zip
-REM =============================
-echo 🗜️ Creando nuevo wordpress-DB.zip...
-del "%TEMP_DIR%\wordpress-DB.zip"
-powershell -Command "Compress-Archive -Path '%DB_DIR%\*' -DestinationPath '%TEMP_DIR%\wordpress-DB.zip'"
+:: ===========================
+:: REEMPLAZO DE DOMINIO
+:: ===========================
+echo ✍️ Reemplazando dominio en wordpress-DB.sql...
+powershell -Command "(Get-Content '%TMP_DIR%\zip_db\wordpress-DB.sql') -replace '%OLD_DOMAIN%', '%NEW_DOMAIN%' | Set-Content '%TMP_DIR%\zip_db\wordpress-DB.sql'" 2>>"%LOG_FILE%"
 
-REM =============================
-REM 5. CREAR ZIP FINAL
-REM =============================
-echo 🧰 Empaquetando %OUTPUT_ZIP%...
-if exist "%OUTPUT_ZIP%" del "%OUTPUT_ZIP%"
-powershell -Command "Compress-Archive -Path '%TEMP_DIR%\wordpress-DB.zip','%TEMP_DIR%\wordpress-ficheros.zip' -DestinationPath '%OUTPUT_ZIP%'"
+:: ===========================
+:: REEMPACAR wordpress-DB.zip
+:: ===========================
+echo 📦 Reempaquetando wordpress-DB.zip...
+powershell -Command "Compress-Archive -Path '%TMP_DIR%\zip_db\*' -DestinationPath '%TMP_DIR%\zip_ext\wordpress-DB.zip' -Force" 2>>"%LOG_FILE%"
 
-REM =============================
-REM 6. COPIAR RESULTADO AL VOLUMEN DOCKER
-REM =============================
-echo 📤 Copiando "%OUTPUT_ZIP%" al volumen de Docker "volumen_z"...
-docker run --rm -v volumen_z:/destino -v "%cd%":/origen busybox sh -c "cp /origen/%OUTPUT_ZIP% /destino"
+:: ===========================
+:: REEMPACAR ARCHIVO FINAL
+:: ===========================
+set FINAL_ZIP=%ZIP_ORIG:.zip=-Modificado.zip%
+echo 📦 Creando %FINAL_ZIP%...
+powershell -Command "Compress-Archive -Path '%TMP_DIR%\zip_ext\*' -DestinationPath 'C:\temp\%FINAL_ZIP%' -Force" 2>>"%LOG_FILE%"
 
-REM =============================
-REM LIMPIEZA FINAL
-REM =============================
-rmdir /s /q "%TEMP_DIR%"
+:: ===========================
+:: SUBIR AL VOLUMEN DESTINO
+:: ===========================
+echo 🚀 Subiendo al volumen destino...
+docker run --rm -v %VOL_DST%:/data -v //c/temp:/backup alpine sh -c "cp /backup/%FINAL_ZIP% /data/" 2>>"%LOG_FILE%"
+if errorlevel 1 (
+    echo ❌ Error al subir al volumen destino. >> "%LOG_FILE%"
+    exit /b 1
+)
 
-echo =============================
-echo ✅ Proceso completado con éxito.
-echo 📂 Archivo generado: %OUTPUT_ZIP%
-echo 📤 También guardado en el volumen: volumen_z
-echo =============================
-pause
+:: ===========================
+:: LIMPIEZA FINAL
+:: ===========================
+echo 🧹 Limpiando archivos temporales...
+rmdir /s /q "%TMP_DIR%"
+
+echo ✅ Proceso completado. Archivo final: %FINAL_ZIP%
+echo [%date% %time%] Proceso completado con éxito >> "%LOG_FILE%"
+exit /b 0

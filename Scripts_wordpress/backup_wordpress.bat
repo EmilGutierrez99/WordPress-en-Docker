@@ -3,7 +3,7 @@ setlocal EnableDelayedExpansion
 
 :: ===================================================
 :: BACKUP DOCKER WORDPRESS + MYSQL  (.ZIP version)
-:: US-98 (Compatible con CMD ANSI - sin BOM)
+:: US-98 (Modificado - Renombra wp.sql → wordpress-DB.sql)
 :: ===================================================
 
 title Backup Docker WP + MySQL
@@ -127,9 +127,10 @@ if errorlevel 1 (
     exit /b
 )
 
-docker cp "%DB_CONTAINER%":/tmp/wp.sql "%BASE_TMP%\wp.sql" >nul 2>&1
+:: Copiar y renombrar el archivo SQL
+docker cp "%DB_CONTAINER%":/tmp/wp.sql "%BASE_TMP%\wordpress-DB.sql" >nul 2>&1
 docker exec "%DB_CONTAINER%" sh -c "rm -f /tmp/wp.sql" >nul 2>&1
-echo [OK] Base de datos exportada correctamente.
+echo [OK] Base de datos exportada correctamente (wordpress-DB.sql).
 
 :: Copiar ficheros de WordPress
 echo.
@@ -146,7 +147,7 @@ echo [OK] Ficheros copiados.
 echo.
 echo Creando archivos ZIP parciales...
 powershell -Command "Compress-Archive -Path '%BASE_TMP%\html\*' -DestinationPath '%BASE_TMP%\wordpress-ficheros.zip' -Force" >nul 2>&1
-powershell -Command "Compress-Archive -Path '%BASE_TMP%\wp.sql' -DestinationPath '%BASE_TMP%\wordpress-DB.zip' -Force" >nul 2>&1
+powershell -Command "Compress-Archive -Path '%BASE_TMP%\wordpress-DB.sql' -DestinationPath '%BASE_TMP%\wordpress-DB.zip' -Force" >nul 2>&1
 
 if not exist "%BASE_TMP%\wordpress-ficheros.zip" (
     echo [ERROR] No se pudo crear wordpress-ficheros.zip
@@ -171,7 +172,7 @@ if not exist "%FINAL_ZIP%" (
     exit /b
 )
 
-:: Copiar al volumen destino (usando contenedor temporal)
+:: Copiar al volumen destino
 echo.
 echo Copiando backup al volumen %TARGET_VOLUME% ...
 docker run --rm -d --name tmp_backup_copy -v "%TARGET_VOLUME%":/data alpine sleep 60 >nul 2>&1
